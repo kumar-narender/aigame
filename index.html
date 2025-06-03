@@ -462,12 +462,30 @@
                     <button class="toggle-btn" id="showStatsBtn" onclick="toggleStats()">
                         📊 Hide Debug Stats
                     </button>
+                    <button class="toggle-btn" onclick="exportPlayerData()">Export Player Data</button>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
+        function exportPlayerData() {
+            console.log("Exporting player data...");
+            if (playerAI && playerAI.playerHistory) {
+                const dataStr = JSON.stringify(playerAI.playerHistory, null, 2);
+                const dataUri = 'data:text/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+
+                const exportFileDefaultName = 'player_data.json';
+
+                let linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+            } else {
+                console.error("Player AI data not found.");
+            }
+        }
+
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
@@ -554,17 +572,26 @@
         const powerups = [];
         const bosses = [];
         
-        // AI Learning System (simplified for performance)
+        // AI Learning System
+        const AI_SEQUENCE_LENGTH = 3; // Must match server's SEQUENCE_LENGTH
+        const SERVER_PREDICT_URL = 'http://localhost:5000/predict';
+
         class RealTimePlayerAI {
             constructor() {
                 this.playerHistory = [];
-                this.maxHistoryLength = 40;
-                this.trained = false;
-                this.accuracy = 0;
+                this.maxHistoryLength = 40; // How much history to keep
+                this.trained = false; // Remains true for local simple prediction
+                this.accuracy = 0; // Local simple prediction accuracy
                 this.bestAccuracy = 0;
-                this.predictions = [];
+                // this.predictions = []; // Not used by current simple predict
                 this.lastUpdate = 0;
-                this.updateInterval = 33; // 30 FPS for AI
+                this.updateInterval = 33; // Local accuracy update interval
+
+                this.lastServerPrediction = null; // To store {x, y} from server
+                this.serverPredictionConfidence = 0; // Placeholder
+                this.serverStatus = "Not Connected"; // For UI
+                this.lastServerCallTime = 0;
+                this.serverCallInterval = 500; // ms, how often to call server if needed
             }
             
             recordPlayerMovement(x, y, vx, vy, time) {
@@ -615,25 +642,89 @@
                     y: current.y + current.vy * 2
                 };
             }
-            
+
+            // This function is called by enemies for targeting.
+            // It returns a simple local prediction immediately.
+            // In parallel, it attempts to get a prediction from the Python AI server.
             predictPlayerPosition(currentX, currentY, vx, vy) {
-                if (!this.trained) return { x: currentX, y: currentY, confidence: 0 };
+                // --- Start: Attempt to get server prediction (asynchronous) ---
+                if (this.playerHistory.length >= AI_SEQUENCE_LENGTH &&
+                    (Date.now() - this.lastServerCallTime > this.serverCallInterval)) {
+
+                    this.lastServerCallTime = Date.now();
+                    const sequenceToPredict = this.playerHistory.slice(-AI_SEQUENCE_LENGTH);
+                    const flatSequence = [];
+                    sequenceToPredict.forEach(state => {
+                        flatSequence.push(state.x, state.y, state.vx, state.vy);
+                    });
+
+                    // console.log("Sending sequence to server:", flatSequence);
+
+                    fetch(SERVER_PREDICT_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ current_sequence: flatSequence }),
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            // Try to get error message from server if available
+                            return response.json().then(errData => {
+                                throw new Error(`Server error: ${response.status} - ${errData.error || 'Unknown error'}`);
+                            }).catch(() => {
+                                // If parsing error response fails
+                                throw new Error(`Server error: ${response.status} - Could not parse error response.`);
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data && typeof data.x !== 'undefined' && typeof data.y !== 'undefined') {
+                            this.lastServerPrediction = { x: data.x, y: data.y, timestamp: Date.now() };
+                            this.serverStatus = "Connected";
+                            // console.log('Server Prediction:', this.lastServerPrediction);
+                            // Optionally update something visual here or store confidence if server sends it
+                        } else {
+                            console.error('Invalid prediction data from server:', data);
+                            this.serverStatus = "Data Error";
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching prediction from server:', error);
+                        this.lastServerPrediction = null;
+                        this.serverStatus = "Error";
+                    });
+                }
+                // --- End: Attempt to get server prediction ---
+
+                // --- Start: Original Simple Prediction (returned immediately) ---
+                // The 'this.trained' and 'this.accuracy' now refer to the simple local model.
+                if (!this.trained) { // If local simple model isn't "trained" (enough history)
+                    return { x: currentX, y: currentY, confidence: 0 };
+                }
                 
-                const prediction = {
+                const simplePrediction = {
                     x: Math.max(0, Math.min(canvas.width, currentX + vx * (2 + aiAggression))),
                     y: Math.max(0, Math.min(canvas.height, currentY + vy * (2 + aiAggression))),
-                    confidence: this.accuracy
+                    confidence: this.accuracy // Confidence of the simple local prediction
                 };
+                // --- End: Original Simple Prediction ---
                 
-                return prediction;
+                // For now, game logic uses the immediate simple prediction.
+                // Server prediction is fetched in background and logged/stored.
+                return simplePrediction;
             }
             
             getStats() {
                 return {
                     samples: this.playerHistory.length,
                     trained: this.trained,
-                    accuracy: Math.round(this.accuracy),
-                    bestAccuracy: Math.round(this.bestAccuracy)
+                    accuracy: Math.round(this.accuracy), // Local simple model accuracy
+                    bestAccuracy: Math.round(this.bestAccuracy),
+                    serverStatus: this.serverStatus,
+                    lastServerX: this.lastServerPrediction ? this.lastServerPrediction.x.toFixed(1) : "N/A",
+                    lastServerY: this.lastServerPrediction ? this.lastServerPrediction.y.toFixed(1) : "N/A"
                 };
             }
         }
@@ -1426,8 +1517,15 @@
             
             document.getElementById('aiSamples').textContent = stats.samples;
             document.getElementById('learningProgress').style.width = `${Math.min(100, (stats.samples / 40) * 100)}%`;
-            document.getElementById('accuracy').textContent = stats.accuracy + '%';
-            
+            document.getElementById('accuracy').textContent = stats.accuracy + '% (local)'; // Clarify it's local
+            document.getElementById('learningStatus').textContent = stats.serverStatus; // Update server status
+
+            // Optional: Display last server prediction for debugging
+            // const serverPredElement = document.getElementById('serverPredictionDisplay'); // Need to add this element
+            // if (serverPredElement) {
+            //    serverPredElement.textContent = `Server: X:${stats.lastServerX}, Y:${stats.lastServerY}`;
+            // }
+
             document.getElementById('aiEnemyCount').textContent = aiEnemyCount;
             document.getElementById('shotsFired').textContent = shotsFired;
             document.getElementById('shootingAccuracy').textContent = shootingAccuracy + '%';
