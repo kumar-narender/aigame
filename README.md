@@ -2,6 +2,21 @@
 
 A Python-based application with intelligent agents that scrape websites and automatically generate beautiful newsletters from the collected content.
 
+## Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Run a simple example
+python main.py https://example.com
+
+# 3. Or try the interactive examples
+python example_usage.py
+```
+
+Your newsletter will be saved in the `output/` directory!
+
 ## Features
 
 - **Asynchronous Web Scraping**: Fast, concurrent scraping of multiple URLs
