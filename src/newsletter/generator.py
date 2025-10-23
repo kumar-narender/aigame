@@ -1,0 +1,256 @@
+"""Newsletter Generator for creating newsletters from scraped content"""
+
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+import json
+
+
+class NewsletterGenerator:
+    """
+    Generator for creating newsletters from scraped web content.
+    """
+
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize the newsletter generator.
+
+        Args:
+            config: Configuration dictionary containing:
+                - template_style: Style of the newsletter (html, markdown, text)
+                - max_items: Maximum number of items to include
+                - include_images: Whether to include images
+        """
+        self.config = config or {}
+        self.template_style = self.config.get("template_style", "html")
+        self.max_items = self.config.get("max_items", 10)
+        self.include_images = self.config.get("include_images", False)
+
+    def generate(
+        self,
+        scraped_data: List[Dict[str, Any]],
+        title: Optional[str] = None,
+        subtitle: Optional[str] = None
+    ) -> str:
+        """
+        Generate a newsletter from scraped data.
+
+        Args:
+            scraped_data: List of dictionaries containing scraped content
+            title: Newsletter title
+            subtitle: Newsletter subtitle
+
+        Returns:
+            Generated newsletter as a string
+        """
+        if not scraped_data:
+            return "No content available for newsletter generation."
+
+        # Filter out failed scrapes and limit items
+        valid_items = [
+            item for item in scraped_data
+            if item.get("success", False)
+        ][:self.max_items]
+
+        if self.template_style == "html":
+            return self._generate_html(valid_items, title, subtitle)
+        elif self.template_style == "markdown":
+            return self._generate_markdown(valid_items, title, subtitle)
+        else:
+            return self._generate_text(valid_items, title, subtitle)
+
+    def _generate_html(
+        self,
+        items: List[Dict[str, Any]],
+        title: Optional[str],
+        subtitle: Optional[str]
+    ) -> str:
+        """
+        Generate HTML newsletter.
+
+        Args:
+            items: List of content items
+            title: Newsletter title
+            subtitle: Newsletter subtitle
+
+        Returns:
+            HTML newsletter string
+        """
+        newsletter_title = title or "Newsletter"
+        newsletter_subtitle = subtitle or f"Generated on {datetime.now().strftime('%Y-%m-%d')}"
+
+        html_parts = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            "    <meta charset='UTF-8'>",
+            "    <meta name='viewport' content='width=device-width, initial-scale=1.0'>",
+            f"    <title>{newsletter_title}</title>",
+            "    <style>",
+            "        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }",
+            "        .header { background-color: #2c3e50; color: white; padding: 30px; text-align: center; border-radius: 5px; }",
+            "        .header h1 { margin: 0; }",
+            "        .header p { margin: 10px 0 0 0; opacity: 0.9; }",
+            "        .item { background-color: white; margin: 20px 0; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
+            "        .item h2 { color: #2c3e50; margin-top: 0; }",
+            "        .item .description { color: #555; margin: 10px 0; }",
+            "        .item .content { color: #666; line-height: 1.6; }",
+            "        .item .url { color: #3498db; text-decoration: none; word-break: break-all; }",
+            "        .item .url:hover { text-decoration: underline; }",
+            "        .footer { text-align: center; padding: 20px; color: #666; }",
+            "    </style>",
+            "</head>",
+            "<body>",
+            "    <div class='header'>",
+            f"        <h1>{newsletter_title}</h1>",
+            f"        <p>{newsletter_subtitle}</p>",
+            "    </div>",
+        ]
+
+        for idx, item in enumerate(items, 1):
+            html_parts.extend([
+                "    <div class='item'>",
+                f"        <h2>{idx}. {item.get('title', 'Untitled')}</h2>",
+            ])
+
+            if item.get('description'):
+                html_parts.append(f"        <p class='description'><em>{item['description']}</em></p>")
+
+            html_parts.extend([
+                f"        <p class='content'>{item.get('content', '')[:500]}...</p>",
+                f"        <p><a href='{item.get('url', '#')}' class='url' target='_blank'>{item.get('url', '')}</a></p>",
+                "    </div>",
+            ])
+
+        html_parts.extend([
+            "    <div class='footer'>",
+            "        <p>Newsletter generated by Web Scraper Agent</p>",
+            "    </div>",
+            "</body>",
+            "</html>",
+        ])
+
+        return "\n".join(html_parts)
+
+    def _generate_markdown(
+        self,
+        items: List[Dict[str, Any]],
+        title: Optional[str],
+        subtitle: Optional[str]
+    ) -> str:
+        """
+        Generate Markdown newsletter.
+
+        Args:
+            items: List of content items
+            title: Newsletter title
+            subtitle: Newsletter subtitle
+
+        Returns:
+            Markdown newsletter string
+        """
+        newsletter_title = title or "Newsletter"
+        newsletter_subtitle = subtitle or f"Generated on {datetime.now().strftime('%Y-%m-%d')}"
+
+        md_parts = [
+            f"# {newsletter_title}",
+            f"*{newsletter_subtitle}*",
+            "",
+            "---",
+            "",
+        ]
+
+        for idx, item in enumerate(items, 1):
+            md_parts.extend([
+                f"## {idx}. {item.get('title', 'Untitled')}",
+                "",
+            ])
+
+            if item.get('description'):
+                md_parts.extend([
+                    f"*{item['description']}*",
+                    "",
+                ])
+
+            md_parts.extend([
+                f"{item.get('content', '')[:500]}...",
+                "",
+                f"**Link:** [{item.get('url', '')}]({item.get('url', '')})",
+                "",
+                "---",
+                "",
+            ])
+
+        md_parts.extend([
+            "",
+            "*Newsletter generated by Web Scraper Agent*",
+        ])
+
+        return "\n".join(md_parts)
+
+    def _generate_text(
+        self,
+        items: List[Dict[str, Any]],
+        title: Optional[str],
+        subtitle: Optional[str]
+    ) -> str:
+        """
+        Generate plain text newsletter.
+
+        Args:
+            items: List of content items
+            title: Newsletter title
+            subtitle: Newsletter subtitle
+
+        Returns:
+            Plain text newsletter string
+        """
+        newsletter_title = title or "Newsletter"
+        newsletter_subtitle = subtitle or f"Generated on {datetime.now().strftime('%Y-%m-%d')}"
+
+        text_parts = [
+            "=" * 80,
+            newsletter_title.center(80),
+            newsletter_subtitle.center(80),
+            "=" * 80,
+            "",
+        ]
+
+        for idx, item in enumerate(items, 1):
+            text_parts.extend([
+                f"{idx}. {item.get('title', 'Untitled').upper()}",
+                "-" * 80,
+            ])
+
+            if item.get('description'):
+                text_parts.extend([
+                    item['description'],
+                    "",
+                ])
+
+            text_parts.extend([
+                item.get('content', '')[:500] + "...",
+                "",
+                f"URL: {item.get('url', '')}",
+                "",
+                "=" * 80,
+                "",
+            ])
+
+        text_parts.extend([
+            "",
+            "Newsletter generated by Web Scraper Agent".center(80),
+        ])
+
+        return "\n".join(text_parts)
+
+    def save_to_file(self, content: str, filename: str) -> None:
+        """
+        Save newsletter content to a file.
+
+        Args:
+            content: Newsletter content
+            filename: Output filename
+        """
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"Newsletter saved to {filename}")
